@@ -36,6 +36,62 @@ void drawLine(RenderWindow& window, double ax, double ay, double bx, double by, 
     window.draw(line);
 }
 
+// the Ray struct, used for casting
+struct Ray {
+    double x = 0;
+    double y = 0;
+    double vx = 0;
+    double vy = 0;
+};
+
+// line segments, which reflect and/or absorb light
+class LineSegment {
+public:
+    vector<double> a = { 0, 0 };
+    vector<double> b = { 0, 0 };
+    vector<int> color = { 255, 255, 255 };
+    double reflectivity = 1;
+    LineSegment(vector<double> a, vector<double> b, vector<int> color, double reflectivity) {
+        this->a = a;
+        this->b = b;
+        this->color = color;
+        this->reflectivity = reflectivity;
+    }
+    // renders the line segment
+    void render(RenderWindow& window) {
+        drawLine(window, a[0], a[1], b[0], b[1], 5, color);
+    }
+    // returns true if a given ray intersects this, or false otherwise
+    vector<double> intersects(Ray r) {
+        // we don't care about the case of infinite intersection, we treat these lasers/segments as infinitely thin
+        if (atan2(b[1] - a[1], b[0] - a[0]) == atan2(r.vy, r.vx)) return {};
+        // the difference between the slopes
+        double slopeDiff = (r.vy / r.vx) - ((b[1] - a[1]) / (b[0] - a[0]));
+        // align them at the same x point as this segment's A point, so we can work out y distance from it
+        double rayYAtPoint = r.y + (r.vy / r.vx) * (a[0] - r.x);
+        // calculate the distance in y values between the two points, and work backwards to get the intersection point
+        double yDiff = a[1] - rayYAtPoint;
+        double Xi = (yDiff / slopeDiff) + a[0];
+        double Yi = r.y + (r.vy / r.vx) * (Xi - r.x);
+
+        // if the intersection x or y are outside the bounds of our line segment, we don't intersect
+        vector<double> bounds = { min(a[0], b[0]), min(a[1], b[1]), max(a[0], b[0]), max(a[1], b[1]) };
+        if (bounds[0] > Xi || bounds[1] > Yi || bounds[2] < Xi || bounds[3] < Yi) {
+            //cout << "Out of bounds: " << Xi << ", " << Yi << "[" << bounds[0] << ", " << bounds[1] << ", " << bounds[2] << ", " << bounds[3] << ", " << "]" << endl;
+            return {};
+        }
+
+        // if the intersection is in the wrong direction from our ray, we don't intersect
+        if ((slopeDiff <= 0 && yDiff > 0) || (slopeDiff >= 0 && yDiff < 0)) {
+            //cout << "Wrong Direction: " << slopeDiff << ", " << yDiff << endl;
+            return {};
+        }
+
+        return {Xi, Yi};
+    }
+};
+
+// a projector shoots a laser and bounces it
 class Projector {
 public:
     CircleShape shape = CircleShape(50);
@@ -81,9 +137,20 @@ public:
         }
     }
     // calculates the bounces of the laser, and alerts hit objects
-    void update() {
+    void update(vector<LineSegment> segments) {
         // calculate the bounces of the laser from various surfaces
-        bounces = { {150, 150}, { 200, 200 }, {400, 100}, {400, 700 }, {500, 900 } };
+        //bounces = { {150, 150}, { 200, 200 }, {400, 100}, {400, 700 }, {500, 900 } };
+        vector<double> lastPos = { pos[0] + radius, pos[1] + radius };
+        double lastDir = rotation;
+        bounces = {lastPos};
+        for (LineSegment line : segments) {
+            vector<double> intersection = line.intersects({lastPos[0], lastPos[1], cos(lastDir), sin(lastDir)});
+            //cout << "checking bounce: " << lastPos[0] << ", " << lastPos[1] << " : " << cos(lastDir) << ", " << sin(lastDir) << endl;
+            //cout << "with: " << line.a[0] << ", " << line.a[1] << " : " << line.b[0] << ", " << line.b[1] << endl;
+            if (intersection.size() == 0) continue;
+            lastPos = intersection;
+            bounces.push_back(lastPos);
+        }
 
         // update color and position of the render object
         shape.setFillColor(Color(laserColor[0], laserColor[1], laserColor[2]));
@@ -113,6 +180,9 @@ int main()
 
     vector<Projector> projectors = {};
     projectors.push_back(Projector({100, 100}, {0,255,0}, 0, false, false));
+
+    vector<LineSegment> segments = {};
+    segments.push_back(LineSegment({ 1000, 50 }, { 1000, 850 }, {0,0,255}, 0));
 
     // run the program as long as the window is open
     while (window.isOpen())
@@ -145,6 +215,9 @@ int main()
 
                 case sf::Event::MouseMoved: {
                     mouseLoc = { (double)event.mouseMove.x, (double)event.mouseMove.y };
+                    for (int i = 0; i < projectors.size(); i++) {
+                        projectors[i].rotation = atan2(mouseLoc[1] - projectors[i].pos[1] - projectors[i].radius, mouseLoc[0] - projectors[i].pos[0] - projectors[i].radius);
+                    }
                     break;
                 }
 
@@ -159,9 +232,9 @@ int main()
         if (dt < 17) continue;
         lastTick = chrono::steady_clock::now();
 
-        // update balls positions and velocities
+        // update projector's bounces and stuff
         for (int i = 0; i < projectors.size(); i++) {
-            projectors[i].update();
+            projectors[i].update(segments);
         }
 
         // clear the window with black color
@@ -170,6 +243,11 @@ int main()
         // render every ball
         for (int i = 0; i < projectors.size(); i++) {
             projectors[i].render(window);
+        }
+
+        // render every segment
+        for (int i = 0; i < segments.size(); i++) {
+            segments[i].render(window);
         }
 
         // end the current frame
