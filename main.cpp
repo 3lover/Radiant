@@ -75,14 +75,14 @@ public:
         double Yi = r.y + (r.vy / r.vx) * (Xi - r.x);
 
         // if the intersection x or y are outside the bounds of our line segment, we don't intersect
-        vector<double> bounds = { min(a[0], b[0]), min(a[1], b[1]), max(a[0], b[0]), max(a[1], b[1]) };
+        vector<double> bounds = { min(a[0], b[0]) - 1, min(a[1], b[1]) - 1, max(a[0], b[0]) + 1, max(a[1], b[1]) + 1 };
         if (bounds[0] > Xi || bounds[1] > Yi || bounds[2] < Xi || bounds[3] < Yi) {
             //cout << "Out of bounds: " << Xi << ", " << Yi << "[" << bounds[0] << ", " << bounds[1] << ", " << bounds[2] << ", " << bounds[3] << ", " << "]" << endl;
             return {};
         }
 
         // if the intersection is in the wrong direction from our ray, we don't intersect
-        if ((slopeDiff <= 0 && yDiff > 0) || (slopeDiff >= 0 && yDiff < 0)) {
+        if ((Xi - r.x <= 0 && r.vx > 0) || (Xi - r.x >= 0 && r.vx < 0) || (Yi - r.y <= 0 && r.vy > 0) || (Yi - r.y >= 0 && r.vy < 0)) {
             //cout << "Wrong Direction: " << slopeDiff << ", " << yDiff << endl;
             return {};
         }
@@ -135,6 +135,16 @@ public:
         for (int i = 0; i < bounces.size() - 1; i++) {
             drawLine(window, bounces[i][0], bounces[i][1], bounces[i + 1][0], bounces[i + 1][1], 5, laserColor);
         }
+
+        drawLine(
+            window,
+            pos[0] + radius,
+            pos[1] + radius,
+            pos[0] + cos(rotation) * radius + radius,
+            pos[0] + sin(rotation) * radius + radius,
+            3,
+            {255, 0, 0}
+        );
     }
     // calculates the bounces of the laser, and alerts hit objects
     void update(vector<LineSegment> segments) {
@@ -179,10 +189,13 @@ int main()
     auto lastTick = chrono::steady_clock::now();
 
     vector<Projector> projectors = {};
-    projectors.push_back(Projector({100, 100}, {0,255,0}, 0, false, false));
+    projectors.push_back(Projector({375, 375}, {0,255,0}, 0, false, false));
 
     vector<LineSegment> segments = {};
-    segments.push_back(LineSegment({ 1000, 50 }, { 1000, 850 }, {0,0,255}, 0));
+    segments.push_back(LineSegment({ 100, 100 }, { 100, 750 }, { 255,255,255 }, 0));
+    segments.push_back(LineSegment({ 100, 750 }, { 750, 750 }, { 255,255,255 }, 0));
+    segments.push_back(LineSegment({ 750, 750 }, { 750, 100 }, { 255,255,255 }, 0));
+    segments.push_back(LineSegment({ 750, 100 }, { 100, 100 }, { 255,255,255 }, 0));
 
     // run the program as long as the window is open
     while (window.isOpen())
