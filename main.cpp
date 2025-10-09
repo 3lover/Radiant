@@ -77,17 +77,29 @@ public:
         // if the intersection x or y are outside the bounds of our line segment, we don't intersect
         vector<double> bounds = { min(a[0], b[0]) - 1, min(a[1], b[1]) - 1, max(a[0], b[0]) + 1, max(a[1], b[1]) + 1 };
         if (bounds[0] > Xi || bounds[1] > Yi || bounds[2] < Xi || bounds[3] < Yi) {
-            //cout << "Out of bounds: " << Xi << ", " << Yi << "[" << bounds[0] << ", " << bounds[1] << ", " << bounds[2] << ", " << bounds[3] << ", " << "]" << endl;
             return {};
         }
 
         // if the intersection is in the wrong direction from our ray, we don't intersect
         if ((Xi - r.x <= 0 && r.vx > 0) || (Xi - r.x >= 0 && r.vx < 0) || (Yi - r.y <= 0 && r.vy > 0) || (Yi - r.y >= 0 && r.vy < 0)) {
-            //cout << "Wrong Direction: " << slopeDiff << ", " << yDiff << endl;
             return {};
         }
 
         return {Xi, Yi};
+    }
+
+    // gets the direction a ray should bounce off this
+    double getBounce(Ray r) {
+        // get the normal of this line segment
+        vector<double> normal = { -(b[1] - a[1]), (b[0] - a[0]) };
+        // split the ray's directional vector into perpendicular components to this normal
+        double uScalar = (r.vy * normal[1] + r.vx * normal[0]) / (normal[1] * normal[1] + normal[0] * normal[0]);
+        vector<double> u = {uScalar * normal[0], uScalar * normal[1]};
+        vector<double> w = {r.vx - u[0], r.vy - u[1]};
+        vector<double> vPrime = {w[0] - u[0], w[1] - u[1]};
+        double newAngle = atan2(vPrime[1], vPrime[0]);
+
+        return newAngle;
     }
 };
 
@@ -141,7 +153,7 @@ public:
             pos[0] + radius,
             pos[1] + radius,
             pos[0] + cos(rotation) * radius + radius,
-            pos[0] + sin(rotation) * radius + radius,
+            pos[1] + sin(rotation) * radius + radius,
             3,
             {255, 0, 0}
         );
@@ -153,13 +165,37 @@ public:
         vector<double> lastPos = { pos[0] + radius, pos[1] + radius };
         double lastDir = rotation;
         bounces = {lastPos};
-        for (LineSegment line : segments) {
-            vector<double> intersection = line.intersects({lastPos[0], lastPos[1], cos(lastDir), sin(lastDir)});
-            //cout << "checking bounce: " << lastPos[0] << ", " << lastPos[1] << " : " << cos(lastDir) << ", " << sin(lastDir) << endl;
-            //cout << "with: " << line.a[0] << ", " << line.a[1] << " : " << line.b[0] << ", " << line.b[1] << endl;
-            if (intersection.size() == 0) continue;
-            lastPos = intersection;
+        int lastBounce = -1;
+        for (int m = 0; m < 100; m++) {
+            int closestIndex = -1;
+            double closestDist = -1;
+            vector<double> closestIntersection = {};
+            bool hit = false;
+            for (int i = 0; i < segments.size(); i++) {
+                if (lastBounce == i) continue;
+                vector<double> intersection = segments[i].intersects({ lastPos[0], lastPos[1], cos(lastDir), sin(lastDir) });
+                if (intersection.size() == 0) continue;
+                // if we do intersect, check if we are closest
+                double distX = intersection[0] - lastPos[0];
+                double distY = intersection[1] - lastPos[1];
+                double intersectDist = sqrt(pow(distX, 2) + pow(distY, 2));
+                if (closestDist < 0 || intersectDist < closestDist) {
+                    closestDist = intersectDist;
+                    closestIndex = i;
+                    closestIntersection = intersection;
+                    hit = true;
+                }
+            }
+            if (!hit) {
+                // find where we land among the boundary
+                break;
+            }
+            lastPos = closestIntersection;
+            lastDir = segments[closestIndex].getBounce({lastPos[0], lastPos[1], cos(lastDir), sin(lastDir)});
             bounces.push_back(lastPos);
+            lastBounce = closestIndex;
+            //cout << "Bounced " << closestIndex << " with strand with colors " << segments[closestIndex].color[0] << ", " << segments[closestIndex].color[1] << ", " << segments[closestIndex].color[2] << endl;
+            if (segments[closestIndex].reflectivity == 0) break;
         }
 
         // update color and position of the render object
@@ -189,13 +225,17 @@ int main()
     auto lastTick = chrono::steady_clock::now();
 
     vector<Projector> projectors = {};
-    projectors.push_back(Projector({375, 375}, {0,255,0}, 0, false, false));
+    projectors.push_back(Projector({BOUNDX/2 - 25, BOUNDY / 2 - 25 }, {0,255,0}, 0, false, false));
 
     vector<LineSegment> segments = {};
-    segments.push_back(LineSegment({ 100, 100 }, { 100, 750 }, { 255,255,255 }, 0));
-    segments.push_back(LineSegment({ 100, 750 }, { 750, 750 }, { 255,255,255 }, 0));
-    segments.push_back(LineSegment({ 750, 750 }, { 750, 100 }, { 255,255,255 }, 0));
-    segments.push_back(LineSegment({ 750, 100 }, { 100, 100 }, { 255,255,255 }, 0));
+    for (int i = 0; i < 8; i++) {
+        segments.push_back(LineSegment({BOUNDX * randDouble(), BOUNDY * randDouble()}, { BOUNDX * randDouble(), BOUNDY * randDouble() }, {rand() % 255,rand() % 255,rand() % 255 }, 1));
+    }
+
+    segments.push_back(LineSegment({ 0, 0 }, { 0, BOUNDY }, { 255,255,255 }, 0));
+    segments.push_back(LineSegment({ 0, BOUNDY }, { BOUNDX, BOUNDY }, { 255,255,255 }, 0));
+    segments.push_back(LineSegment({ BOUNDX, BOUNDY }, { BOUNDX, 0 }, { 255,255,255 }, 0));
+    segments.push_back(LineSegment({ BOUNDX, 0 }, { 0, 0 }, { 255,255,255 }, 0));
 
     // run the program as long as the window is open
     while (window.isOpen())
