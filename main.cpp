@@ -111,8 +111,10 @@ public:
     vector<int> borderColor = { 255, 255, 255 };
     vector<int> laserColor = { 255, 255, 255 };
     double rotation = 0;
-    double radius = 50;
+    double radius = 25;
+    double borderSize = 0.2;
     bool requireCharge = false;
+    bool charged = false;
     bool locked = false;
 
     vector<vector<double>> bounces = {};
@@ -134,7 +136,7 @@ public:
         this->borderColor = { 255, 255, 255 };
         this->laserColor = laserColor;
         this->rotation = rotation;
-        this->radius = 50;
+        this->radius = 25;
         this->requireCharge = requireCharge;
         this->locked = locked;
     }
@@ -158,13 +160,70 @@ public:
             {255, 0, 0}
         );
     }
-    // calculates the bounces of the laser, and alerts hit objects
-    void update(vector<LineSegment> segments) {
-        // calculate the bounces of the laser from various surfaces
-        //bounces = { {150, 150}, { 200, 200 }, {400, 100}, {400, 700 }, {500, 900 } };
+
+    // checks if a line segment intersects this shape, and sends each set of intersections if so
+    vector<double> intersects(vector<double> A, vector<double> B) {
+        // compute the euclidean distance between A and B
+        double LAB = sqrt(pow((B[0] - A[0]), 2) + pow((B[1] - A[1]), 2));
+
+        // compute the direction vector D from A to B
+        double Dx = (B[0] - A[0]) / LAB;
+        double Dy = (B[1] - A[1]) / LAB;
+
+        // the equation of the line AB is x = Dx*t + Ax, y = Dy*t + Ay with 0 <= t <= LAB.
+
+        // compute the distance between the points A and E, where
+        // E is the point of AB closest the circle center (Cx, Cy)
+        double t = Dx * (pos[0] + radius - A[0]) + Dy * (pos[1] + radius - A[1]);
+
+        // compute the coordinates of the point E
+        double Ex = t * Dx + A[0];
+        double Ey = t * Dy + A[1];
+
+        // compute the euclidean distance between E and C
+        double LEC = sqrt(pow((Ex - pos[0] - radius), 2) + pow((Ey - pos[1] - radius), 2));
+        vector<double> bounds = { min(A[0], B[0]) - 1, min(A[1], B[1]) - 1, max(A[0], B[0]) + 1, max(A[1], B[1]) + 1 };
+
+        // test if the line intersects the circle
+        if (LEC < radius * (1+ borderSize)) {
+            // compute distance from t to circle intersection point
+            double dt = sqrt(pow(radius * (1 + borderSize), 2) - pow(LEC, 2));
+
+            // compute first intersection point
+            double Fx = (t - dt) * Dx + A[0];
+            double Fy = (t - dt) * Dy + A[1];
+
+            // compute second intersection point
+            double Gx = (t + dt) * Dx + A[0];
+            double Gy = (t + dt) * Dy + A[1];
+
+            vector<double> intersections = {};
+
+            // check if both fall within our line segment
+            if (bounds[0] <= Fx && bounds[1] <= Fy && bounds[2] >= Fx && bounds[3] >= Fy) {
+                intersections.push_back(Fx);
+                intersections.push_back(Fy);
+            }
+            if (bounds[0] <= Gx && bounds[1] <= Gy && bounds[2] >= Gx && bounds[3] >= Gy) {
+                intersections.push_back(Gx);
+                intersections.push_back(Gy);
+            }
+
+            return intersections;
+        }
+        if (LEC == radius * (1 + borderSize)) {
+            // tangent point to circle is E
+            if (bounds[0] <= Ex && bounds[1] <= Ey && bounds[2] >= Ex && bounds[3] >= Ey) {
+                return { Ex, Ey };
+            }
+        }
+        return {};
+    }
+
+    void calculateBounces(vector<LineSegment> &segments, vector<Projector> &projectors) {
         vector<double> lastPos = { pos[0] + radius, pos[1] + radius };
         double lastDir = rotation;
-        bounces = {lastPos};
+        bounces = { lastPos };
         int lastBounce = -1;
         for (int m = 0; m < 100; m++) {
             int closestIndex = -1;
@@ -190,18 +249,50 @@ public:
                 // find where we land among the boundary
                 break;
             }
+            // we have our next line segment, before we push it check if it intersects with a projector instead
+            int projectorId = -1;
+            for (int i = 0; i < projectors.size(); i++) {
+                if (pos == projectors[i].pos) continue;
+                vector<double> intersection = projectors[i].intersects(lastPos, closestIntersection);
+                if (intersection.size() == 0) continue;
+                // if we do intersect another projector, check if it is the closest one and if so send a hit
+                projectorId = i;
+                if (intersection.size() == 2) {
+                    closestIntersection = { intersection[0], intersection[1] };
+                    continue;
+                }
+                double dist1 = pow(intersection[0] - lastPos[0], 2) + pow(intersection[1] - lastPos[1], 2);
+                double dist2 = pow(intersection[2] - lastPos[0], 2) + pow(intersection[3] - lastPos[1], 2);
+                if (dist1 < dist2) closestIntersection = { intersection[0], intersection[1] };
+                else closestIntersection = { intersection[2], intersection[3] };
+            }
+
+            // if we intersected a projector, hit them then end our bouncing
+            if (projectorId != -1) {
+                bounces.push_back(closestIntersection);
+                projectors[projectorId].hit({});
+                break;
+            }
+
             lastPos = closestIntersection;
-            lastDir = segments[closestIndex].getBounce({lastPos[0], lastPos[1], cos(lastDir), sin(lastDir)});
+            lastDir = segments[closestIndex].getBounce({ lastPos[0], lastPos[1], cos(lastDir), sin(lastDir) });
             bounces.push_back(lastPos);
             lastBounce = closestIndex;
             //cout << "Bounced " << closestIndex << " with strand with colors " << segments[closestIndex].color[0] << ", " << segments[closestIndex].color[1] << ", " << segments[closestIndex].color[2] << endl;
             if (segments[closestIndex].reflectivity == 0) break;
         }
+    }
+
+    // calculates the bounces of the laser, and alerts hit objects
+    void update(vector<LineSegment> &segments, vector<Projector> &projectors) {
+        // calculate the bounces of the laser from various surfaces
+        if (charged || !requireCharge) calculateBounces(segments, projectors);
+        else bounces = { { pos[0] + radius, pos[1] + radius } };
 
         // update color and position of the render object
         shape.setFillColor(Color(laserColor[0], laserColor[1], laserColor[2]));
         shape.setPosition(pos[0], pos[1]);
-        shape.setOutlineThickness(radius/5);
+        shape.setOutlineThickness(radius / 5);
         shape.setOutlineColor(Color(borderColor[0], borderColor[1], borderColor[2]));
     }
     // if hit, check the history to see if we should change our color and propogate the hit
@@ -209,9 +300,13 @@ public:
         // if we find ourselves anywhere on the list, stop the propogation and assign all lasers on the list the same color, since it is a loop
         bool infiniteLoop = false;
         for (Projector* hit : hits) if (hit == this) infiniteLoop = true;
+
+        // add ourselves to the list if not
+        hits.push_back(this);
+
         for (Projector* hit : hits) {
             Projector &proj = *hit;
-            proj.laserColor = { 255, 0, 0 }; // set to red for testing
+            proj.laserColor = { rand() % 255, rand() % 255, rand() % 255 }; // randomize laser when hit
         }
     }
 };
@@ -225,10 +320,11 @@ int main()
     auto lastTick = chrono::steady_clock::now();
 
     vector<Projector> projectors = {};
-    projectors.push_back(Projector({BOUNDX/2 - 25, BOUNDY / 2 - 25 }, {0,255,0}, 0, false, false));
+    projectors.push_back(Projector({ BOUNDX/2 - 125, BOUNDY / 2 - 25 }, {255,0,0}, 0, false, false));
+    projectors.push_back(Projector({ BOUNDX / 2 + 75, BOUNDY / 2 + 25 }, { 0,255,0 }, 0, true, false));
 
     vector<LineSegment> segments = {};
-    for (int i = 0; i < 8; i++) {
+    for (int i = 0; i < 4; i++) {
         segments.push_back(LineSegment({BOUNDX * randDouble(), BOUNDY * randDouble()}, { BOUNDX * randDouble(), BOUNDY * randDouble() }, {rand() % 255,rand() % 255,rand() % 255 }, 1));
     }
 
@@ -287,7 +383,7 @@ int main()
 
         // update projector's bounces and stuff
         for (int i = 0; i < projectors.size(); i++) {
-            projectors[i].update(segments);
+            projectors[i].update(segments, projectors);
         }
 
         // clear the window with black color
