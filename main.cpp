@@ -16,6 +16,14 @@ double randDouble() {
     return (((double)rand() - 1) / RAND_MAX);
 }
 
+// takes in 2 colors and merges them, then normalizes them
+vector<int> mergeColors(vector<int> c1, vector<int> c2) {
+    vector<double> merged = { (double)(c1[0] + c2[0]), (double)(c1[1] + c2[1]), (double)(c1[2] + c2[2]) };
+    double highest = max(max(merged[0], merged[1]), merged[2]);
+    if (highest == 0) return { 0, 0, 0 };
+    return { (int)(merged[0] / highest * 255), (int)(merged[1] / highest * 255) , (int)(merged[2] / highest * 255) };
+}
+
 // draws a line between 2 points
 void drawLine(RenderWindow& window, double ax, double ay, double bx, double by, double thickness, vector<int> color) {
     Vector2f point1(ax, ay);
@@ -109,32 +117,37 @@ public:
     CircleShape shape = CircleShape(50);
     vector<double> pos = { 0, 0 };
     vector<int> borderColor = { 255, 255, 255 };
-    vector<int> laserColor = { 255, 255, 255 };
+    vector<int> laserColor = { 0, 0, 0 };
+    vector<int> producedColor = { 255, 255, 255 };
     double rotation = 0;
     double radius = 25;
     double borderSize = 0.2;
     bool requireCharge = false;
-    bool charged = false;
     bool locked = false;
+    vector<Projector*> hittingProjectors = {};
+    bool selected = false;
+    double rotating = 0;
 
     vector<vector<double>> bounces = {};
     // full constructor in case
-    Projector(vector<double> pos, vector<int> borderColor, vector<int> laserColor, double rotation, double radius, bool requireCharge, bool locked) {
+    Projector(vector<double> pos, vector<int> borderColor, vector<int> laserColor, double rotation, double radius, bool requireCharge, bool locked, vector<int> producedColor) {
         shape.setRadius(radius);
         this->pos = { pos[0], pos[1] };
         this->borderColor = borderColor;
         this->laserColor = laserColor;
+        this->producedColor = producedColor;
         this->rotation = rotation;
         this->radius = radius;
         this->requireCharge = requireCharge;
         this->locked = locked;
     }
     // practically, we only need these from our constructor
-    Projector(vector<double> pos, vector<int> laserColor, double rotation, bool requireCharge, bool locked) {
+    Projector(vector<double> pos, vector<int> producedColor, double rotation, bool requireCharge, bool locked) {
         shape.setRadius(radius);
         this->pos = { pos[0], pos[1] };
         this->borderColor = { 255, 255, 255 };
-        this->laserColor = laserColor;
+        this->producedColor = producedColor;
+        if (!requireCharge) this->laserColor = producedColor;
         this->rotation = rotation;
         this->radius = 25;
         this->requireCharge = requireCharge;
@@ -157,8 +170,13 @@ public:
             pos[0] + cos(rotation) * radius + radius,
             pos[1] + sin(rotation) * radius + radius,
             3,
-            {255, 0, 0}
+            { 255 - laserColor[0], 255 - laserColor[0], 255 - laserColor[0] }
         );
+    }
+
+    // returns true if a point falls inside this circle
+    bool inside(double x, double y) {
+        return pow(x - pos[0] - radius, 2) + pow(y - pos[1] - radius, 2) <= pow(radius, 2);
     }
 
     // checks if a line segment intersects this shape, and sends each set of intersections if so
@@ -252,7 +270,7 @@ public:
             // we have our next line segment, before we push it check if it intersects with a projector instead
             int projectorId = -1;
             for (int i = 0; i < projectors.size(); i++) {
-                if (pos == projectors[i].pos) continue;
+                if (pos == projectors[i].pos && m == 0) continue;
                 vector<double> intersection = projectors[i].intersects(lastPos, closestIntersection);
                 if (intersection.size() == 0) continue;
                 // if we do intersect another projector, check if it is the closest one and if so send a hit
@@ -270,7 +288,8 @@ public:
             // if we intersected a projector, hit them then end our bouncing
             if (projectorId != -1) {
                 bounces.push_back(closestIntersection);
-                projectors[projectorId].hit({});
+                projectors[projectorId].hittingProjectors.push_back(this);
+                projectors[projectorId].hit({this});
                 break;
             }
 
@@ -285,15 +304,25 @@ public:
 
     // calculates the bounces of the laser, and alerts hit objects
     void update(vector<LineSegment> &segments, vector<Projector> &projectors) {
+        // if rotating, rotate us in the right direction
+        rotation += rotating * 3.0 / 60.0;
+
         // calculate the bounces of the laser from various surfaces
-        if (charged || !requireCharge) calculateBounces(segments, projectors);
+        if (laserColor[0] != 0 || laserColor[1] != 0 || laserColor[2] != 0) calculateBounces(segments, projectors);
         else bounces = { { pos[0] + radius, pos[1] + radius } };
+
+        // if we are not hit by anything, revert to our standard colors
+        if (hittingProjectors.size() == 0) {
+            if (requireCharge) laserColor = { 0, 0, 0 };
+            else laserColor = producedColor;
+        }
 
         // update color and position of the render object
         shape.setFillColor(Color(laserColor[0], laserColor[1], laserColor[2]));
         shape.setPosition(pos[0], pos[1]);
         shape.setOutlineThickness(radius / 5);
-        shape.setOutlineColor(Color(borderColor[0], borderColor[1], borderColor[2]));
+        vector<int> usedBorder = selected ? mergeColors(borderColor, {0, 255, 0}) : borderColor;
+        shape.setOutlineColor(Color(usedBorder[0], usedBorder[1], usedBorder[2]));
     }
     // if hit, check the history to see if we should change our color and propogate the hit
     void hit(vector<Projector*> hits) {
@@ -301,12 +330,20 @@ public:
         bool infiniteLoop = false;
         for (Projector* hit : hits) if (hit == this) infiniteLoop = true;
 
+        if (infiniteLoop) {
+            for (int i = 0; i < hits.size(); i++) {
+                Projector& proj = *hits[i];
+                proj.laserColor = { 255, 0, 0 };
+            }
+        }
+
         // add ourselves to the list if not
         hits.push_back(this);
 
-        for (Projector* hit : hits) {
-            Projector &proj = *hit;
-            proj.laserColor = { rand() % 255, rand() % 255, rand() % 255 }; // randomize laser when hit
+        for (int i = 1; i < hits.size(); i++) {
+            Projector& hitter = *hits[i - 1];
+            Projector &proj = *hits[i];
+            proj.laserColor = mergeColors(proj.laserColor, hitter.laserColor);
         }
     }
 };
@@ -337,35 +374,62 @@ int main()
     while (window.isOpen())
     {
         // check all the window's events that were triggered since the last iteration of the loop
-        sf::Event event;
+        Event event;
         while (window.pollEvent(event)) {
             // check the type of the event
             switch (event.type) {
                 // window closed
-                case sf::Event::Closed: {
+                case Event::Closed: {
                     window.close();
                     break;
                 }
 
                 // key pressed
-                case sf::Event::KeyPressed: {
-
-                    break;
-                }
-
-                // mouse clicked
-                case sf::Event::MouseButtonPressed: {
-                    if (event.mouseButton.button == sf::Mouse::Left)
-                    {
-                        
+                case Event::KeyPressed: {
+                    bool left = (event.key.code == Keyboard::Left) || (event.key.code == Keyboard::A);
+                    bool right = (event.key.code == Keyboard::Right) || (event.key.code == Keyboard::D);
+                    if (left || right) {
+                        // rotate selected lasers when buttons are pressed
+                        for (int i = 0; i < projectors.size(); i++) {
+                            if (!projectors[i].selected) continue;
+                            projectors[i].rotating = left ? -1 : 1;
+                        }
                     }
                     break;
                 }
 
-                case sf::Event::MouseMoved: {
+                // key released
+                case Event::KeyReleased: {
+                    bool left = (event.key.code == Keyboard::Left) || (event.key.code == Keyboard::A);
+                    bool right = (event.key.code == Keyboard::Right) || (event.key.code == Keyboard::D);
+                    if (left || right) {
+                        for (int i = 0; i < projectors.size(); i++) {
+                            if (!projectors[i].selected) continue;
+                            projectors[i].rotating = 0;
+                        }
+                    }
+                    break;
+                }
+
+                // mouse clicked
+                case Event::MouseButtonPressed: {
+                    if (event.mouseButton.button == Mouse::Left)
+                    {
+                        // check if we fall within any projectors, and select them if we do
+                        for (int i = 0; i < projectors.size(); i++) {
+                            if (projectors[i].inside(mouseLoc[0], mouseLoc[1])) {
+                                projectors[i].selected = true;
+                            }
+                            else projectors[i].selected = false;
+                        }
+                    }
+                    break;
+                }
+
+                case Event::MouseMoved: {
                     mouseLoc = { (double)event.mouseMove.x, (double)event.mouseMove.y };
                     for (int i = 0; i < projectors.size(); i++) {
-                        projectors[i].rotation = atan2(mouseLoc[1] - projectors[i].pos[1] - projectors[i].radius, mouseLoc[0] - projectors[i].pos[0] - projectors[i].radius);
+                        //projectors[i].rotation = atan2(mouseLoc[1] - projectors[i].pos[1] - projectors[i].radius, mouseLoc[0] - projectors[i].pos[0] - projectors[i].radius);
                     }
                     break;
                 }
@@ -382,6 +446,9 @@ int main()
         lastTick = chrono::steady_clock::now();
 
         // update projector's bounces and stuff
+        for (int i = 0; i < projectors.size(); i++) {
+            projectors[i].hittingProjectors.clear();
+        }
         for (int i = 0; i < projectors.size(); i++) {
             projectors[i].update(segments, projectors);
         }
