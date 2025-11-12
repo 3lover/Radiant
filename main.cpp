@@ -470,36 +470,320 @@ public:
     }
 };
 
-int main()
-{
-    // create the window
-    sf::RenderWindow window(sf::VideoMode(BOUNDX, BOUNDY), "Radiant");
+bool progress() {
+    char response;
+    cout << "Would you like to progress to the next level? (y/n)" << endl;
+    cin >> response;
+    if (response == 'y' || response == 'Y') return true;
+    else if (response == 'n' || response == 'N') return false;
+    else {
+        cout << "Invalid input. Please enter 'y' or 'n'." << endl;
+        return progress();
+    }
+}
 
-    vector<double> mouseLoc = {0, 0};
-    auto lastTick = chrono::steady_clock::now();
 
+// Generic function to create projectors for level creation
+vector<Projector> levelCreationProjectors() {
+        vector<Projector> projectors = {};
+        projectors.push_back(Projector({ BOUNDX / 2 - 125, BOUNDY / 2 - 25 }, { 255,0,0 }, 0, false, false));
+        projectors.push_back(Projector({ BOUNDX / 2 + 75, BOUNDY / 2 + 25 }, { 0,255,0 }, 0, false, false));
+
+        projectors.push_back(Projector({ BOUNDX / 2 - 125, BOUNDY / 2 - 225 }, { 0,0,255 }, 0, false, false));
+        projectors.push_back(Projector({ BOUNDX / 2 + 75, BOUNDY / 2 + 225 }, { 0,0,0 }, 0, true, false));
+        
+		return projectors;
+    }
+//Win condtion for level one: turn on the locked projector
+vector<Projector> levelOneCreationProjectors() {
     vector<Projector> projectors = {};
-    projectors.push_back(Projector({ BOUNDX/2 - 125, BOUNDY / 2 - 25 }, {255,0,0}, 0, false, false));
-    projectors.push_back(Projector({ BOUNDX / 2 + 75, BOUNDY / 2 + 25 }, { 0,255,0 }, 0, false, false));
+    projectors.push_back(Projector({ BOUNDX / 2 - 500, BOUNDY / 2  }, { 255,0,0 }, 0, false, false));
+    projectors.push_back(Projector({ BOUNDX / 2 , BOUNDY / 2 -150 }, { 0,255,0 }, 0, true, false));
+    cout << "Level 1: Activate the projector using the red laser." << endl;
+    return projectors;
+}
+//Win condition for level two: turn all projectors to yellow
+vector<Projector> levelTwoCreationProjectors() {
+    vector<Projector> projectors = {};
+    projectors.push_back(Projector({ BOUNDX / 2 , BOUNDY / 2 - 150 }, { 255,0,0 }, 0, false, false));
+    projectors.push_back(Projector({ BOUNDX / 2 + 250, BOUNDY / 2 + 150 }, { 0,255,0 }, 0, false, false));
+    projectors.push_back(Projector({ BOUNDX / 2 -250, BOUNDY / 2 + 150 }, { 0,0,0 }, 0, true, false));
+    cout << "Level 2: Turn all projectors yellow using the red and green lasers." << endl;
+    return projectors;
+}
 
-    projectors.push_back(Projector({ BOUNDX / 2 - 125, BOUNDY / 2 - 225 }, { 0,0,255 }, 0, false, false));
-    projectors.push_back(Projector({ BOUNDX / 2 + 75, BOUNDY / 2 + 225 }, { 0,0,0 }, 0, true, false));
+//Win condition for level there: turn the middle projector yellow
+vector<Projector> levelThreeCreationProjectors() {
+    vector<Projector> projectors = {};
+    projectors.push_back(Projector({ BOUNDX / 2 , BOUNDY / 2 - 150 }, { 255,0,0 }, 0, false, false));
+    projectors.push_back(Projector({ BOUNDX / 2 , BOUNDY / 2  }, { 0,0,0 }, 0, true, false));
+    projectors.push_back(Projector({ BOUNDX / 2 , BOUNDY / 2 + 150 }, { 0,255,0 }, 0, false, false));
+    cout << "Level 3: Turn the middle projector yellow using the red and green lasers." << endl;
+    return projectors;
+}
 
+//Win condition for level there: turn all the projectors yellow
+vector<Projector> levelFourCreationProjectors() {
+    vector<Projector> projectors = {};
+    projectors.push_back(Projector({ BOUNDX / 2 , BOUNDY / 2 - 150 }, { 255,0,0 }, 0, false, false));
+    projectors.push_back(Projector({ BOUNDX / 2 , BOUNDY / 2 }, { 0,255,0 }, 0, false, false));
+    projectors.push_back(Projector({ BOUNDX / 2 , BOUNDY / 2 + 150 }, { 0,0,0 }, 0, true, false));
+    cout << "Level 4: Turn all projectors yellow using the red and green lasers." << endl;
+    return projectors;
+}
+//Win condition for level five: turn all the projectors to Lavander 
+vector<Projector> levelFiveCreationProjectors() {
+    vector<Projector> projectors = {};
+    projectors.push_back(Projector({ BOUNDX / 2 + 400, BOUNDY / 2 - 200 }, { 255,0,0 }, 0, false, false));
+    projectors.push_back(Projector({ BOUNDX / 2 - 400 , BOUNDY / 2 - 200 }, { 0,255,0 }, 0, false, false));
+    projectors.push_back(Projector({ BOUNDX / 2 + 400 , BOUNDY / 2 + 200 }, { 0,0,255 }, 0, false, false));
+    projectors.push_back(Projector({ BOUNDX / 2 - 400 , BOUNDY / 2 + 200 }, { 0,0,255 }, 0, false, false));
+    projectors.push_back(Projector({ BOUNDX / 2 , BOUNDY / 2 - 300 }, { 0,0,0 }, 0, false, true));
+    projectors.push_back(Projector({ BOUNDX / 2 , BOUNDY / 2 }, { 0,0,0 }, 90, true, false));
+    cout << "Level 5: Turn all projectors lavender (127, 127, 255)." << endl;
+    return projectors;
+}
+
+
+// Generic function to create line segments for level creation
+vector<LineSegment> levelCreationLineSegments() {
     vector<LineSegment> segments = {};
     for (int i = 0; i < 0; i++) {
-        segments.push_back(LineSegment({BOUNDX * randDouble(), BOUNDY * randDouble()}, { BOUNDX * randDouble(), BOUNDY * randDouble() }, {rand() % 255,rand() % 255,rand() % 255 }, 1));
+        segments.push_back(LineSegment({ BOUNDX * randDouble(), BOUNDY * randDouble() }, { BOUNDX * randDouble(), BOUNDY * randDouble() }, { rand() % 255,rand() % 255,rand() % 255 }, 1));
     }
 
     segments.push_back(LineSegment({ 0, 0 }, { 0, BOUNDY }, { 255,255,255 }, 0));
     segments.push_back(LineSegment({ 0, BOUNDY }, { BOUNDX, BOUNDY }, { 255,255,255 }, 0));
     segments.push_back(LineSegment({ BOUNDX, BOUNDY }, { BOUNDX, 0 }, { 255,255,255 }, 0));
     segments.push_back(LineSegment({ BOUNDX, 0 }, { 0, 0 }, { 255,255,255 }, 0));
+	return segments;
+}
+
+vector<LineSegment> levelOneCreationLineSegments() {
+    vector<LineSegment> segments = {};
+    for (int i = 0; i < 0; i++) {
+        segments.push_back(LineSegment({ BOUNDX * randDouble(), BOUNDY * randDouble() }, { BOUNDX * randDouble(), BOUNDY * randDouble() }, { rand() % 255,rand() % 255,rand() % 255 }, 1));
+    }
+
+    segments.push_back(LineSegment({ 0, 0 }, { 0, BOUNDY }, { 255,255,255 }, 0));
+    segments.push_back(LineSegment({ 0, BOUNDY }, { BOUNDX, BOUNDY }, { 255,255,255 }, 0));
+    segments.push_back(LineSegment({ BOUNDX, BOUNDY }, { BOUNDX, 0 }, { 255,255,255 }, 0));
+    segments.push_back(LineSegment({ BOUNDX, 0 }, { 0, 0 }, { 255,255,255 }, 0));
+    return segments;
+}
+
+vector<LineSegment> levelTwoCreationLineSegments() {
+    vector<LineSegment> segments = {};
+    for (int i = 0; i < 0; i++) {
+        segments.push_back(LineSegment({ BOUNDX * randDouble(), BOUNDY * randDouble() }, { BOUNDX * randDouble(), BOUNDY * randDouble() }, { rand() % 255,rand() % 255,rand() % 255 }, 1));
+    }
+
+    segments.push_back(LineSegment({ 0, 0 }, { 0, BOUNDY }, { 255,255,255 }, 0));
+    segments.push_back(LineSegment({ 0, BOUNDY }, { BOUNDX, BOUNDY }, { 255,255,255 }, 0));
+    segments.push_back(LineSegment({ BOUNDX, BOUNDY }, { BOUNDX, 0 }, { 255,255,255 }, 0));
+    segments.push_back(LineSegment({ BOUNDX, 0 }, { 0, 0 }, { 255,255,255 }, 0));
+    return segments;
+}
+
+vector<LineSegment> levelThreeCreationLineSegments() {
+    vector<LineSegment> segments = {};
+    for (int i = 0; i < 0; i++) {
+        segments.push_back(LineSegment({ BOUNDX * randDouble(), BOUNDY * randDouble() }, { BOUNDX * randDouble(), BOUNDY * randDouble() }, { rand() % 255,rand() % 255,rand() % 255 }, 1));
+    }
+
+    segments.push_back(LineSegment({ 0, 0 }, { 0, BOUNDY }, { 255,255,255 }, 0));
+    segments.push_back(LineSegment({ 0, BOUNDY }, { BOUNDX, BOUNDY }, { 255,255,255 }, 0));
+    segments.push_back(LineSegment({ BOUNDX, BOUNDY }, { BOUNDX, 0 }, { 255,255,255 }, 0));
+    segments.push_back(LineSegment({ BOUNDX, 0 }, { 0, 0 }, { 255,255,255 }, 0));
+    segments.push_back(LineSegment({ BOUNDX - 500, BOUNDY }, { BOUNDX - 500, -BOUNDY }, { 255,255,255 }, 1));
+    segments.push_back(LineSegment({ 500 , BOUNDY }, { 500 , -BOUNDY }, { 255,255,255 }, 1));
+    segments.push_back(LineSegment({ 600 , 550 }, { 1000, 550 }, { 255,255,255 }, 0));
+    segments.push_back(LineSegment({ 600 , 400 }, { 1000, 400 }, { 255,255,255 }, 0));
+    segments.push_back(LineSegment({ 600 , 700 }, { 1000, 700 }, { 255,255,255 }, 0));
+    return segments;
+}
+
+vector<LineSegment> levelFourCreationLineSegments() {
+    vector<LineSegment> segments = {};
+    for (int i = 0; i < 0; i++) {
+        segments.push_back(LineSegment({ BOUNDX * randDouble(), BOUNDY * randDouble() }, { BOUNDX * randDouble(), BOUNDY * randDouble() }, { rand() % 255,rand() % 255,rand() % 255 }, 1));
+    }
+
+    segments.push_back(LineSegment({ 0, 0 }, { 0, BOUNDY }, { 255,255,255 }, 0));
+    segments.push_back(LineSegment({ 0, BOUNDY }, { BOUNDX, BOUNDY }, { 255,255,255 }, 0));
+    segments.push_back(LineSegment({ BOUNDX, BOUNDY }, { BOUNDX, 0 }, { 255,255,255 }, 0));
+    segments.push_back(LineSegment({ BOUNDX, 0 }, { 0, 0 }, { 255,255,255 }, 0));
+    segments.push_back(LineSegment({ BOUNDX - 500, BOUNDY }, { BOUNDX - 500, -BOUNDY }, { 255,255,255 }, 1));
+    segments.push_back(LineSegment({ 500 , BOUNDY }, { 500 , -BOUNDY }, { 255,255,255 }, 1));
+    segments.push_back(LineSegment({ 600 , 550 }, { 1000, 550 }, { 255,255,255 }, 0));
+    segments.push_back(LineSegment({ 600 , 400 }, { 1000, 400 }, { 255,255,255 }, 0));
+    segments.push_back(LineSegment({ 600 , 700 }, { 1000, 700 }, { 255,255,255 }, 0));
+    segments.push_back(LineSegment({ 600 , 400 }, { 600, 550 }, { 255,255,255 }, 1));
+    return segments;
+}
+
+vector<LineSegment> levelFiveCreationLineSegments() {
+    vector<LineSegment> segments = {};
+    for (int i = 0; i < 0; i++) {
+        segments.push_back(LineSegment({ BOUNDX * randDouble(), BOUNDY * randDouble() }, { BOUNDX * randDouble(), BOUNDY * randDouble() }, { rand() % 255,rand() % 255,rand() % 255 }, 1));
+    }
+
+    segments.push_back(LineSegment({ 0, 0 }, { 0, BOUNDY }, { 255,255,255 }, 0));
+    segments.push_back(LineSegment({ 0, BOUNDY }, { BOUNDX, BOUNDY }, { 255,255,255 }, 0));
+    segments.push_back(LineSegment({ BOUNDX, BOUNDY }, { BOUNDX, 0 }, { 255,255,255 }, 0));
+    segments.push_back(LineSegment({ BOUNDX, 0 }, { 0, 0 }, { 255,255,255 }, 0));
+    segments.push_back(LineSegment({ 50 , 650 }, { 50, 250 }, { 255,255,255 }, 1));
+    segments.push_back(LineSegment({ 825 , BOUNDY }, {825, 500 }, { 255,255,255 }, 0));
+    return segments;
+}
+void checkWinCondition(vector<Projector> &projectors, vector<LineSegment> &segments, int &level) {
+    // level five win condition: all projectors are lavender
+    if (level == 1) {
+        if (projectors[1].laserColor[0] > 0) {
+            bool win = true;
+            
+            cout << "You win!" << endl;
+            if (progress()) {
+                level += 1;
+                projectors = levelTwoCreationProjectors();
+                segments = levelTwoCreationLineSegments();
+            }
+            else {
+                projectors = levelOneCreationProjectors();
+                segments = levelOneCreationLineSegments();
+            }
+        }
+    }
+    else if (level == 2) {
+        bool win = true;
+        for( int i = 0; i < projectors.size(); i++) {
+            Projector proj = projectors[i];
+            if (!(proj.laserColor[0] == 255)) win = false;
+            if (!(proj.laserColor[1] == 255)) win = false;
+		}
+        if (win) {
+            cout << "You win!" << endl;
+            if (progress()) {
+                level += 1;
+                projectors = levelThreeCreationProjectors();
+                segments = levelThreeCreationLineSegments();
+            }
+            else {
+                projectors = levelTwoCreationProjectors();
+                segments = levelTwoCreationLineSegments();
+            }
+        }
+    }
+    else if (level == 3) {
+        if(projectors[1].laserColor[0] == 255 && projectors[1].laserColor[1] == 255){
+            cout << "You win!" << endl;
+            if (progress()) {
+                level += 1;
+                projectors = levelFourCreationProjectors();
+                segments = levelFourCreationLineSegments();
+            }
+            else {
+                projectors = levelThreeCreationProjectors();
+                segments = levelThreeCreationLineSegments();
+            }
+		}
+    }
+    else if (level == 4) {
+        bool win = true;
+        for (int i = 0; i < projectors.size(); i++) {
+            Projector proj = projectors[i];
+            if (!(proj.laserColor[0] == 255)) win = false;
+            if (!(proj.laserColor[1] == 255)) win = false;
+        }
+        if (win) {
+            cout << "You win!" << endl;
+            if (progress()) {
+                level += 1;
+                projectors = levelFiveCreationProjectors();
+                segments = levelFiveCreationLineSegments();
+            }
+            else {
+            projectors = levelFourCreationProjectors();
+            segments = levelFourCreationLineSegments();
+            }
+            
+        }
+    }
+    else if (level == 5) {
+        bool won = true;
+        for (int i = 0; i < projectors.size(); i++) {
+            Projector proj = projectors[i];
+            if (!(proj.laserColor[0] == 127)) won = false;
+            if (!(proj.laserColor[1] == 127)) won = false;
+            if (!(proj.laserColor[2] == 255)) won = false;
+        }
+        if (won) {
+            cout << "You win! BANG" << endl;
+			level += 1;
+        }
+    }
+}
+
+void intialLoad(vector<Projector>& projectors, vector<LineSegment>& segments, int& level) {
+	bool validInput = false;
+    cout << "Welcome to Radiant!" << endl;
+    cout << "Please enter a level number (1-5):" << endl;
+    while (!validInput){   
+        cin >> level;
+        if (level == 1) {
+            validInput = true;
+			projectors = levelOneCreationProjectors();
+			segments = levelOneCreationLineSegments();
+        }
+        else if (level == 2) {
+            validInput = true;
+			projectors = levelTwoCreationProjectors();  
+			segments = levelTwoCreationLineSegments();
+        }
+        else if (level == 3) {
+            validInput = true;
+			projectors = levelThreeCreationProjectors();
+			segments = levelThreeCreationLineSegments();
+        }
+        else if (level == 4) {
+            validInput = true;
+			projectors = levelFourCreationProjectors();
+			segments = levelFourCreationLineSegments();
+            
+        }
+        else if (level == 5) {
+			validInput = true;
+			projectors = levelFiveCreationProjectors();
+			segments = levelFiveCreationLineSegments();
+            
+        }
+    }
+    cout << "Use the left and right arrow keys or A and D to rotate selected projectors." << endl;
+    cout << "Click on a projector to select it." << endl;
+    cout << "Your goal is to solve each level by mixing colors of light using mirrors and projectors." << endl;
+    cout << "Good luck!" << endl;
+}
+
+
+int main()
+{
+    int level;
+    // create the window
+    sf::RenderWindow window(sf::VideoMode(BOUNDX, BOUNDY), "Radiant");
+
+    vector<double> mouseLoc = {0, 0};
+    auto lastTick = chrono::steady_clock::now();
+  
+    vector<Projector> projectors;
+    vector<LineSegment> segments;
+	intialLoad(projectors, segments, level);
 
     // run the program as long as the window is open
     while (window.isOpen())
     {
         // check all the window's events that were triggered since the last iteration of the loop
         Event event;
+		checkWinCondition(projectors, segments, level);
         while (window.pollEvent(event)) {
             // check the type of the event
             switch (event.type) {
