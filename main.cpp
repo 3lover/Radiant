@@ -72,15 +72,40 @@ public:
     // returns true if a given ray intersects this, or false otherwise
     vector<double> intersects(Ray r) {
         // we don't care about the case of infinite intersection, we treat these lasers/segments as infinitely thin
-        if (atan2(b[1] - a[1], b[0] - a[0]) == atan2(r.vy, r.vx)) return {};
-        // the difference between the slopes
-        double slopeDiff = (r.vy / r.vx) - ((b[1] - a[1]) / (b[0] - a[0]));
-        // align them at the same x point as this segment's A point, so we can work out y distance from it
-        double rayYAtPoint = r.y + (r.vy / r.vx) * (a[0] - r.x);
-        // calculate the distance in y values between the two points, and work backwards to get the intersection point
-        double yDiff = a[1] - rayYAtPoint;
-        double Xi = (yDiff / slopeDiff) + a[0];
-        double Yi = r.y + (r.vy / r.vx) * (Xi - r.x);
+        if (atan2(b[1] - a[1], b[0] - a[0]) == atan2(r.vy, r.vx)) {
+            return {};
+        }
+
+        double Xi, Yi;
+
+        // vertical slope catching
+        if (abs(r.vx) < 0.001) {
+            Xi = r.x;
+            // if this is a vertical line, return false, we don't hit that with a vertical laser
+            if (b[0] - a[0] == 0) return {};
+            double segSlope = (b[1] - a[1]) / (b[0] - a[0]);
+            double intercept = a[1] - segSlope * a[0];
+            Yi = segSlope * Xi + intercept;
+        }
+        // horizontal slope catching
+        else if (abs(r.vy) < 0.001) {
+            Yi = r.y;
+            // if this is a horizontal line, return false, we don't hit that with a vertical laser
+            if (b[1] - a[1] == 0) return {};
+            double segSlope = (b[0] - a[0]) / (b[1] - a[1]);
+            double intercept = a[0] - segSlope * a[1];
+            Xi = segSlope * Yi + intercept;
+        }
+        else {
+            // the difference between the slopes
+            double slopeDiff = (r.vy / r.vx) - ((b[1] - a[1]) / (b[0] - a[0]));
+            // align them at the same x point as this segment's A point, so we can work out y distance from it
+            double rayYAtPoint = r.y + (r.vy / r.vx) * (a[0] - r.x);
+            // calculate the distance in y values between the two points, and work backwards to get the intersection point
+            double yDiff = a[1] - rayYAtPoint;
+            Xi = (yDiff / slopeDiff) + a[0];
+            Yi = r.y + (r.vy / r.vx) * (Xi - r.x);
+        }
 
         // if the intersection x or y are outside the bounds of our line segment, we don't intersect
         vector<double> bounds = { min(a[0], b[0]) - 1, min(a[1], b[1]) - 1, max(a[0], b[0]) + 1, max(a[1], b[1]) + 1 };
@@ -89,10 +114,9 @@ public:
         }
 
         // if the intersection is in the wrong direction from our ray, we don't intersect
-        if ((Xi - r.x <= 0 && r.vx > 0) || (Xi - r.x >= 0 && r.vx < 0) || (Yi - r.y <= 0 && r.vy > 0) || (Yi - r.y >= 0 && r.vy < 0)) {
+        if ((Xi - r.x < 0 && r.vx > 0) || (Xi - r.x > 0 && r.vx < 0) || (Yi - r.y < 0 && r.vy > 0) || (Yi - r.y > 0 && r.vy < 0)) {
             return {};
         }
-
         return {Xi, Yi};
     }
 
@@ -111,6 +135,14 @@ public:
     }
 };
 
+// as we go through and calculate loops, this helps us track input and output colors
+struct InputColor {
+    int colorId;
+    bool resolved;
+    vector<int> value;
+};
+vector<vector<int>> connectedLoops = {};
+
 // a projector shoots a laser and bounces it
 class Projector {
 public:
@@ -126,13 +158,18 @@ public:
     double borderSize = 0.2;
     bool requireCharge = false;
     bool locked = false;
-    vector<Projector*> hittingProjectors = {};
+    vector<Projector*> hitting = {};
+    vector<InputColor*> inputs = {};
+    InputColor* output = new InputColor{ -1, false, {} };
+    int colorId = 0;
     bool selected = false;
     double rotating = 0;
+    vector<double> beams = {0};
+    bool loopChecked = false;
 
-    vector<vector<double>> bounces = {};
+    vector<vector<vector<double>>> bounces = {};
     // full constructor in case
-    Projector(vector<double> pos, vector<int> borderColor, vector<int> laserColor, double rotation, double radius, bool requireCharge, bool locked, vector<int> producedColor) {
+    Projector(vector<double> pos, vector<int> borderColor, vector<int> laserColor, double rotation, double radius, bool requireCharge, bool locked, vector<int> producedColor, vector<double> beams) {
         shape.setRadius(radius);
         this->pos = { pos[0], pos[1] };
         this->borderColor = borderColor;
@@ -142,9 +179,10 @@ public:
         this->radius = radius;
         this->requireCharge = requireCharge;
         this->locked = locked;
+        this->beams = beams;
     }
     // practically, we only need these from our constructor
-    Projector(vector<double> pos, vector<int> producedColor, double rotation, bool requireCharge, bool locked) {
+    Projector(vector<double> pos, vector<int> producedColor, double rotation, bool requireCharge, bool locked, vector<double> beams) {
         shape.setRadius(radius);
         this->pos = { pos[0], pos[1] };
         this->borderColor = { 255, 255, 255 };
@@ -154,6 +192,7 @@ public:
         this->radius = 25;
         this->requireCharge = requireCharge;
         this->locked = locked;
+        this->beams = beams;
     }
     // renders the laser and all of its bounces, called in the update loop at 60Hz
     void render(RenderWindow& window) {
@@ -161,8 +200,8 @@ public:
         window.draw(shape);
 
         // draw the laser based on the segments calculated between bounces
-        for (int i = 0; i < bounces.size() - 1; i++) {
-            drawLine(window, bounces[i][0], bounces[i][1], bounces[i + 1][0], bounces[i + 1][1], 5, laserColor);
+        for (int i = 0; i < bounces.size(); i++) for (int j = 0; j < bounces[i].size() - 1; j++) {
+            drawLine(window, bounces[i][j][0], bounces[i][j][1], bounces[i][j + 1][0], bounces[i][j + 1][1], 5, laserColor);
         }
 
         drawLine(
@@ -240,10 +279,10 @@ public:
         return {};
     }
 
-    void calculateBounces(vector<LineSegment> &segments, vector<Projector> &projectors) {
+    vector<vector<double>> calculateBounces(vector<LineSegment> &segments, vector<Projector> &projectors, double dir) {
         vector<double> lastPos = { pos[0] + radius, pos[1] + radius };
-        double lastDir = rotation;
-        bounces = { lastPos };
+        double lastDir = rotation + dir;
+        vector<vector<double>> beamBounces = { lastPos };
         int lastBounce = -1;
         for (int m = 0; m < 100; m++) {
             int closestIndex = -1;
@@ -254,6 +293,7 @@ public:
                 if (lastBounce == i) continue;
                 vector<double> intersection = segments[i].intersects({ lastPos[0], lastPos[1], cos(lastDir), sin(lastDir) });
                 if (intersection.size() == 0) continue;
+                hit = true;
                 // if we do intersect, check if we are closest
                 double distX = intersection[0] - lastPos[0];
                 double distY = intersection[1] - lastPos[1];
@@ -262,7 +302,6 @@ public:
                     closestDist = intersectDist;
                     closestIndex = i;
                     closestIntersection = intersection;
-                    hit = true;
                 }
             }
             if (!hit) {
@@ -289,18 +328,19 @@ public:
 
             // if we intersected a projector, hit them then end our bouncing
             if (projectorId != -1) {
-                bounces.push_back(closestIntersection);
-                projectors[projectorId].hittingProjectors.push_back(this);
+                beamBounces.push_back(closestIntersection);
+                projectors[projectorId].hitting.push_back(this);
                 break;
             }
 
             lastPos = closestIntersection;
             lastDir = segments[closestIndex].getBounce({ lastPos[0], lastPos[1], cos(lastDir), sin(lastDir) });
-            bounces.push_back(lastPos);
+            beamBounces.push_back(lastPos);
             lastBounce = closestIndex;
-            //cout << "Bounced " << closestIndex << " with strand with colors " << segments[closestIndex].color[0] << ", " << segments[closestIndex].color[1] << ", " << segments[closestIndex].color[2] << endl;
             if (segments[closestIndex].reflectivity == 0) break;
         }
+
+        return beamBounces;
     }
 
     // calculates the bounces of the laser, and alerts hit objects
@@ -309,153 +349,82 @@ public:
         rotation += rotating * 3.0 / 60.0;
 
         // calculate the bounces of the laser from various surfaces
-        calculateBounces(segments, projectors);
+        bounces = {};
+        for (int i = 0; i < beams.size(); i++) {
+            bounces.push_back(calculateBounces(segments, projectors, beams[i]));
+        }
 
         // remove our laser color, we'll resolve for it later anyways
         if (requireCharge) laserColor = { 0, 0, 0 };
         else laserColor = producedColor;
     }
 
-    // propogates the colors from all lasers hitting this by back-calculating
-    /*vector<int> propogateColor(Projector* parentCall, bool embraceInfinity, bool firstLoop, vector<int> trackedIndex = {}) {
-        if (firstLoop) parentCall = this;
-
-        // if we aren't hit, return our color (or lack thereof), unless we are outside an infinite loop being calculated for
-        if (hittingProjectors.size() == 0) {
-            if (requireCharge) return { 0, 0, 0 };
-            else return producedColor;
+    
+    
+    // initializes the inputs and outputs related to this laser from the hitting list
+    void generateThroughput() {
+        // add the output beam to our inputs for every laser hitting us
+        for (int i = 0; i < hitting.size(); i++) {
+            inputs.push_back(hitting[i]->output);
         }
-
-        // otherwise, sum all colors hitting this, and if in an infinite loop only care about those within the loop
-        // first get our own color as a basis for addition
-        vector<int> totalColor;
-        if (requireCharge) totalColor = { 0, 0, 0 };
-        else totalColor = embraceInfinity ? laserColor : producedColor;
-
-        // loop through, until we reach a basis or ourselves we sum everything in between
-        for (int i = 0; i < hittingProjectors.size(); i++) {
-            Projector proj = *hittingProjectors[i];
-            vector<int> foundColor;
-            // if we stare into the infinite and it stares back, look away quickly to preserve what little sanity we have left
-            if (parentCall == hittingProjectors[i]) {
-                if (embraceInfinity) foundColor = { 0, 0, 0 };
-                else foundColor = {-1};
-            }
-            else foundColor = proj.propogateColor(parentCall, embraceInfinity, false, trackedIndex);
-
-            // if an infinite loop propogates back up, rerun our propogation to only care about produced colors (since they originate in the loop)
-            if (foundColor[0] == -1) {
-                foundColor.push_back(i); // keep track of the indeces this occurs at
-                if (firstLoop) return propogateColor(parentCall, true, false, foundColor);
-                return foundColor;
-            }
-
-            // otherwise, sum them like normal
-            totalColor = { totalColor[0] + foundColor[0], totalColor[1] + foundColor[1] , totalColor[2] + foundColor[2] };
-        }
-        
-        // finally, once everyone has responded to us, return the total color we found, which will be clamped later
-        return totalColor;
-    }*/
-
-    // checks down every hitting vector to see if a specific one is found, returning the path to it if so (with the target last in the path)
-    // for example, if L1 hits L2, which hits L3, which then hits L1 again, and L1 is passed as a target, this would return loop of { L1, L3, L2 }
-    vector<Projector*> findLoop(Projector* target) {
-        // if we don't have it, send an empty response
-        if (hittingProjectors.size() == 0) return {};
-        for (int i = 0; i < hittingProjectors.size(); i++) {
-            // if we have it, start propogating the infinite loop backwards
-            if (target == hittingProjectors[i]) return { hittingProjectors[i] };
-            // if we don't find it here, look deeper
-            Projector proj = *hittingProjectors[i];
-            vector<Projector*> propogation = proj.findLoop(target);
-            if (propogation.size() == 0) continue;
-            // if looking deeper found it, add ourselves to the list and keep passing it back up
-            propogation.push_back(hittingProjectors[i]);
-            return propogation;
-        }
-        // if none of our branches found anything, send an empty response
-        return {};
+        // once finished running for every laser, each laser will have the input and output color channels affecting them
     }
 
-    // returns an empty vector if not, or a vector of vectors, with each separate loop of projectors
-    vector<vector<Projector*>> inInfiniteLoop() {
-        vector<vector<Projector*>> loops = {};
-        for (int i = 0; i < hittingProjectors.size(); i++) {
-            // for every projector hitting us, check if we appear in their propogated hit list, and if so add it as an infinite loop
-            vector<Projector*> thisLoop = findLoop(this);
-            if (thisLoop.size() > 0) loops.push_back(thisLoop);
+    // if the laser has every output defined, go through and collapse the input to a resolved value and propogate it
+    bool collapseColorInputs() {
+        // if we already have our output, or don't have our inputs settled, return false representing a failed collapse
+        for (InputColor* c : inputs) if (!c->resolved) { 
+            return false;
         }
-        return loops;
+        if (output->resolved) {
+            return false;
+        }
+        // if we reach here, every color output we have is resolved so crunch those numbers
+        vector<int> avgColor = { producedColor[0], producedColor[1], producedColor[2] };
+        for (InputColor* c : inputs) {
+            avgColor = { avgColor[0] + c->value[0], avgColor[1] + c->value[1], avgColor[2] + c->value[2] };
+            laserColor = mergeColors(avgColor, { 0, 0, 0 });
+        }
+        output->resolved = true;
+        output->value = laserColor;
+        return true;
+        // once this runs for every projector until they all return false, all non-looped projectors should be solved
     }
 
-    // propogates color all the way down, reassigning over loop color as needed
-    vector<int> propogateColor(bool onlyStatics = false) {
-        // looped objects already know what color they want to be from prior calculations, so just use that
-        if (infiniteLoops.size() > 0) {
-            if (onlyStatics) return {0, 0, 0};
-            return loopedColor;
-        }
-
-        vector<int> totalColor = { 0, 0, 0 };
-        if (!requireCharge) totalColor = producedColor;
-
-        // go through every projector hitting this and request their color too
-        for (int i = 0; i < hittingProjectors.size(); i++) {
-            // combine the colors of all things hitting us to get our color
-            Projector proj = *hittingProjectors[i];
-            vector<int> mergedColor = proj.propogateColor();
-            totalColor = { totalColor[0] + mergedColor[0], totalColor[1] + mergedColor[1], totalColor[2] + mergedColor[2] };
-        }
-
-        return totalColor;
-    }
-
-    // propogates color through loops
-    void propogateLoopColor(bool firstLoop) {
-        // if we aren't in an infinite loop, remove any loop color we have
-        if (infiniteLoops.size() == 0) {
-            loopedColor = { -1, -1, -1 };
+    // finds the highest order loop
+    void findHighestLoop(vector<int> previous, int safety = 0) {
+        if (safety > 99) {
+            cout << "Max loop limit reached!";
             return;
         }
 
-        // for each loop, if it doesn't already have a color, calculate the base color for the loop
-        vector<int> totalColor = { 0, 0, 0 };
-        vector<Projector*> uniqueProjectors = {};
-        for (vector<Projector*> loop : infiniteLoops) for (Projector* projPointer : loop) {
-            // don't include the same projector twice
-            bool found = false;
-            for (Projector* projPointer2 : uniqueProjectors) if (projPointer == projPointer2) found = true;
-            if (found) continue;
-            uniqueProjectors.push_back(projPointer);
-
-            // if our projector produces light, average it into the loop's average
-            Projector proj = *projPointer;
-            if (!proj.requireCharge) {
-                totalColor[0] += proj.producedColor[0];
-                totalColor[1] += proj.producedColor[1];
-                totalColor[2] += proj.producedColor[2];
+        for (int i = previous.size() - 1; i >= 0; i--) {
+            // if we have found a completed loop, push our highest-order list of looped projectors for merging later
+            if (previous[i] == colorId) {
+                vector<int> connected = {};
+                for (int j = i; j < previous.size(); j++) connected.push_back(previous[j]);
+                for (int j = 0; j < connectedLoops.size(); j++) {
+                    if (connectedLoops[j].size() != connected.size()) continue;
+                    bool found = false;
+                    for (int k = 0; k < connectedLoops[j].size(); k++) {
+                        for (int l = 0; l < connected.size(); l++) {
+                            if (connected[l] == connectedLoops[j][k]) found = true;
+                        }
+                        if (!found) break;
+                    }
+                    if (!found) continue;
+                    return;
+                }
+                connectedLoops.push_back(connected);
+                return;
             }
         }
 
-        // we have found the loop average, now we need to check if our loop has inputs we will use instead
-        vector<int> loopInputs = { 0, 0, 0 };
-        for (int i = 0; i < uniqueProjectors.size(); i++) {
-            Projector proj = *uniqueProjectors[i];
-            // go through every projector in our loop and find all inputs of light to our loop, if any exist
-            for (int j = 0; j < proj.hittingProjectors.size(); j++) {
-                Projector child = *proj.hittingProjectors[j];
-                vector<int> childStatics = child.propogateColor(true);
-                loopInputs = { loopInputs[0] + childStatics[0], loopInputs[1] + childStatics[1], loopInputs[2] + childStatics[2] };
-            }
-        }
-        if (loopInputs[0] == 0 && loopInputs[1] == 0 && loopInputs[2] == 0) {
-            // if we don't have any inputs, clamp our averaged loop color, we are done, yay!
-            if (loopedColor[0] == -1 && loopedColor[1] == -1 && loopedColor[2] == -1) loopedColor = mergeColors({ 0, 0, 0 }, totalColor);
-        }
-        else {
-            // if we have input to our loop, our looped color becomes that input
-            loopedColor = mergeColors({ 0, 0, 0 }, loopInputs);
+        // otherwise, add ourselves to the loop and move to our next source of input
+        previous.push_back(colorId);
+        for (int i = 0; i < hitting.size(); i++) {
+            if (hitting[i]->output->resolved) continue;
+            hitting[i]->findHighestLoop(previous, safety + 1);
         }
     }
 
@@ -469,6 +438,60 @@ public:
         shape.setOutlineColor(Color(usedBorder[0], usedBorder[1], usedBorder[2]));
     }
 };
+
+// solves a looped color by finding every input to every projector, or using the stored color of the looped items if no inputs exist
+vector<int> solveLoop(vector<int> loop, vector<Projector> projectors) {
+    vector<int> totalInput = { 0, 0, 0 };
+    vector<int> storedColor = { 0, 0, 0 };
+    vector<int> defaultColor = { 0, 0, 0 };
+    for (int i = 0; i < loop.size(); i++) {
+        int node = -1;
+        for (int j = 0; j < projectors.size(); j++) {
+            if (projectors[j].colorId == loop[i]) {
+                node = j;
+                break;
+            }
+        }
+        if (node == -1) {
+            cout << "Failed to find projector in loop";
+            return {};
+        }
+        // search for the resolved inputs of this node
+        for (int j = 0; j < projectors[node].hitting.size(); j++) {
+            if (projectors[node].hitting[j]->output->resolved) {
+                totalInput = {
+                    totalInput[0] + projectors[node].hitting[j]->output->value[0],
+                    totalInput[1] + projectors[node].hitting[j]->output->value[1],
+                    totalInput[2] + projectors[node].hitting[j]->output->value[2]
+                };
+            }
+            if (projectors[node].hitting[j]->loopedColor[0] != -1) {
+                storedColor = {
+                    storedColor[0] + projectors[node].hitting[j]->loopedColor[0],
+                    storedColor[1] + projectors[node].hitting[j]->loopedColor[1],
+                    storedColor[2] + projectors[node].hitting[j]->loopedColor[2]
+                };
+            }
+            if (!projectors[node].hitting[j]->requireCharge) {
+                defaultColor = {
+                    defaultColor[0] + projectors[node].hitting[j]->producedColor[0],
+                    defaultColor[1] + projectors[node].hitting[j]->producedColor[1],
+                    defaultColor[2] + projectors[node].hitting[j]->producedColor[2]
+                };
+            }
+        }
+    }
+    // we now have our total input from all sources of the loop, now either use the input, or our stored value if input is 0
+    if (totalInput[0] != 0 || totalInput[1] != 0 || totalInput[2] != 0) {
+        return mergeColors({ 0, 0, 0 }, totalInput);
+    }
+
+    if (storedColor[0] != 0 || storedColor[1] != 0 || storedColor[2] != 0) {
+        return mergeColors({ 0, 0, 0 }, storedColor);
+    }
+    // if we don't have input and also have no stored value yet, find the stored value from the sum of the loop's inner contents
+    return mergeColors({ 0, 0, 0 }, defaultColor);
+}
 
 bool progress() {
     char response;
@@ -488,6 +511,17 @@ vector<Projector> levelCreationProjectors() {
         vector<Projector> projectors = {};
         projectors.push_back(Projector({ BOUNDX / 2 - 125, BOUNDY / 2 - 25 }, { 255,0,0 }, 0, false, false));
         projectors.push_back(Projector({ BOUNDX / 2 + 75, BOUNDY / 2 + 25 }, { 0,255,0 }, 0, false, false));
+    vector<Projector> projectors = {};
+
+    // the top left loop
+    projectors.push_back(Projector({ 250, 250 }, { 0,0,0 }, 0, true, false, { 0 }));
+    projectors.push_back(Projector({ 400, 250 }, { 0,0,255 }, 0, false, false, { 0 }));
+    projectors.push_back(Projector({ 400, 400 }, { 0,0,0 }, 0, true, false, { PI / 2, 3 * PI / 2 }));
+
+    // the bottom right loop
+    projectors.push_back(Projector({ BOUNDX - 250, BOUNDY - 250 }, { 0,0,0 }, 0, true, false, { 0 }));
+    projectors.push_back(Projector({ BOUNDX - 400, BOUNDY - 250 }, { 0,255,0 }, 0, false, false, { 0 }));
+    projectors.push_back(Projector({ BOUNDX - 400, BOUNDY - 400 }, { 0,0,0 }, 0, true, false, { PI / 2, 3 * PI / 2 }));
 
         projectors.push_back(Projector({ BOUNDX / 2 - 125, BOUNDY / 2 - 225 }, { 0,0,255 }, 0, false, false));
         projectors.push_back(Projector({ BOUNDX / 2 + 75, BOUNDY / 2 + 225 }, { 0,0,0 }, 0, true, false));
@@ -623,6 +657,9 @@ vector<LineSegment> levelFourCreationLineSegments() {
 }
 
 vector<LineSegment> levelFiveCreationLineSegments() {
+    // the input
+    projectors.push_back(Projector({ 250, BOUNDY - 250 }, { 255,0,0 }, 0, false, false, { 0 }));
+
     vector<LineSegment> segments = {};
     for (int i = 0; i < 0; i++) {
         segments.push_back(LineSegment({ BOUNDX * randDouble(), BOUNDY * randDouble() }, { BOUNDX * randDouble(), BOUNDY * randDouble() }, { rand() % 255,rand() % 255,rand() % 255 }, 1));
@@ -854,30 +891,80 @@ int main()
         if (dt < 17) continue;
         lastTick = chrono::steady_clock::now();
 
-        // update projector's bounces and stuff
+        // clear data from the previous loop, and set up projectors for propogation and bounce detection down the line
         for (int i = 0; i < projectors.size(); i++) {
-            projectors[i].hittingProjectors.clear();
+            projectors[i].inputs.clear();
+            projectors[i].hitting.clear();
+            projectors[i].colorId = i;
+            projectors[i].loopChecked = false;
+            delete projectors[i].output;
+            projectors[i].output = new InputColor{ i, false, {} };
         }
         // update the bounces and hits for each projector
         for (int i = 0; i < projectors.size(); i++) {
             projectors[i].update(segments, projectors);
         }
-        // calculate the loops every projector is in
+        // create the input and output vectors for every projector
         for (int i = 0; i < projectors.size(); i++) {
-            projectors[i].infiniteLoops = projectors[i].inInfiniteLoop();
+            projectors[i].generateThroughput();
         }
-        for (int i = 0; i < projectors.size(); i++) {
-            projectors[i].propogateLoopColor(true);
+        // collapse all color inputs until we either finish, or are only left with infinite loops
+        bool done = true;
+        for (int j = 0; j < 999; j++) {
+            done = true;
+            for (int i = 0; i < projectors.size(); i++) {
+                if (projectors[i].collapseColorInputs()) {
+                    projectors[i].loopedColor = { -1, -1, -1 };
+                    done = false;
+                }
+            }
+            if (done) {
+                break;
+            }
+            if (j == 998) cout << "Failed to collapse color inputs" << endl;
         }
-        // propogate colors from hit projectors
-        vector<vector<int>> savedLaserColors = {};
-        for (int i = 0; i < projectors.size(); i++) {
-            savedLaserColors.push_back(projectors[i].propogateColor());
+
+        for (int a = 0; a < 99; a++) {
+            connectedLoops = {};
+
+            // we now only have loops, so for each laser attempt to find the highest order loops
+            for (int i = 0; i < projectors.size(); i++) {
+                projectors[i].findHighestLoop({}, 0);
+            }
+
+            // we have the highest order loops pushed to our connected loops vector, solve these then repeat
+            for (int i = 0; i < connectedLoops.size(); i++) {
+                vector<int> loopColor = solveLoop(connectedLoops[i], projectors);
+                for (int j = 0; j < connectedLoops[i].size(); j++) {
+                    int node = -1;
+                    for (int k = 0; k < projectors.size(); k++) {
+                        if (projectors[k].colorId == connectedLoops[i][j]) {
+                            node = k;
+                            break;
+                        }
+                    }
+                    if (node == -1) {
+                        cout << "Failed to find projector in loop";
+                        return {};
+                    }
+                    // assign its output and resolve it
+                    projectors[node].laserColor = loopColor;
+                    projectors[node].loopedColor = loopColor;
+                    projectors[node].output->resolved = true;
+                    projectors[node].output->value = loopColor;
+                }
+            }
+
+            // check if every projector has an output
+            bool done = true;
+            for (int j = 0; j < projectors.size(); j++) {
+                if (!projectors[j].output->resolved) done = false;
+            }
+            if (done) break;
+
+            if (a == 98) cout << "Failed to calculate loops" << endl;
         }
-        // go through and update every laser at once, that way order does not affect how colors mix
-        for (int i = 0; i < projectors.size(); i++) {
-            projectors[i].laserColor = mergeColors({ 0, 0, 0 }, savedLaserColors[i]);
-        }
+
         // update our render colors to match what we calculated
         for (int i = 0; i < projectors.size(); i++) {
             projectors[i].updateColors();
